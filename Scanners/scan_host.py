@@ -5,106 +5,229 @@
 # by FM
 # Python 3
 # -------------------------------------
-import os, platform, socket, subprocess, sys, time, re
+import os, platform, sys, time, re, ipaddress, threading, multiprocessing
 from datetime import datetime as dt
 from subprocess import Popen, PIPE
+from multiprocessing.queues import Queue
 
-## Network scan function
-def run_scanner(subnet, interface):
+# The following implementation of custom MyQueue to avoid NotImplementedError
+# when calling queue.qsize() in MacOS X comes almost entirely from this github
+# discussion: https://github.com/keras-team/autokeras/issues/368
+# Necessary modification is made to make the code compatible with Python3.
 
-    try:
-        ## Sets the range of ip address from subnet
-        (ip, cidr) = subnet.split('/')
-        cidr = int(cidr) 
-        host_bits = 32 - cidr
-        i = struct.unpack('>I', socket.inet_aton(ip))[0] # note the endianness
-        start = (i >> host_bits) << host_bits # clear the host bits
-        end = start | ((1 << host_bits) - 1)
+class SharedCounter(object):
+    """ A synchronized shared counter.
+    The locking done by multiprocessing.Value ensures that only a single
+    process or thread may read or write the in-memory ctypes object. However,
+    in order to do n += 1, Python performs a read followed by a write, so a
+    second process may read the old value before the new one is written by the
+    first process. The solution is to use a multiprocessing.Lock to guarantee
+    the atomicity of the modifications to Value.
+    This class comes almost entirely from Eli Bendersky's blog:
+    http://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing/
+    """
 
-        # excludes the first and last address in the subnet
-        for i in range(start, end):
-            print(socket.inet_ntoa(struct.pack('>I',i)))
+    def __init__(self, n=0):
+        self.count = multiprocessing.Value('i', n)
 
-        ## Validates if the OS is Windows or other
-        ## and sets the appropriate commands
-        oper = platform.system()
-        if(oper == "Windows"):
-            ping1 = "ping -n 1 "
-            arping1 = "arping -n 1 -i " + interface
-        else:
-            ping1 = "ping -c 1 "
-            arping1 = "arping -c 1 -i " + interface
+    def increment(self, n=1):
+        """ Increment the counter by n (default = 1) """
+        with self.count.get_lock():
+            self.count.value += n
 
-        ## Scans the machines in the defined range
-        print("Scanning in Progress")
-        for ip in range(start,end):
-            addr = net + '.' + str(ip)
-            print("Testing ip " + addr)
-            comm1 = ping1 + addr
-            resp1 = os.popen(comm1)
+    @property
+    def value(self):
+        """ Return the value of the counter """
+        return self.count.value
 
-            status = "DOWN"
-            for line in resp1.readlines():
-                if(line.upper().count("TTL")):
-                    status = "UP"
-                    #print(addr, "--> Live")
+class ImpQueue(Queue):
+    """ A portable implementation of multiprocessing.Queue.
+    Because of multithreading / multiprocessing semantics, Queue.qsize() may
+    raise the NotImplementedError exception on Unix platforms like Mac OS X
+    where sem_getvalue() is not implemented. This subclass addresses this
+    problem by using a synchronized shared counter (initialized to zero) and
+    increasing / decreasing its value every time the put() and get() methods
+    are called, respectively. This not only prevents NotImplementedError from
+    being raised, but also allows us to implement a reliable version of both
+    qsize() and empty().
+    Note the implementation of __getstate__ and __setstate__ which help to
+    serialize MyQueue when it is passed between processes. If these functions
+    are not defined, MyQueue cannot be serialized, which will lead to the error
+    of "AttributeError: 'MyQueue' object has no attribute 'size'".
+    See the answer provided here: https://stackoverflow.com/a/65513291/9723036
+    
+    For documentation of using __getstate__ and __setstate__ to serialize objects,
+    refer to here: https://docs.python.org/3/library/pickle.html#pickling-class-instances
+    """
+
+    def __init__(self):
+        super().__init__(ctx=multiprocessing.get_context())
+        self.size = SharedCounter(0)
+
+    def __getstate__(self):
+        """Help to make MyQueue instance serializable.
+        Note that we record the parent class state, which is the state of the
+        actual queue, and the size of the queue, which is the state of MyQueue.
+        self.size is a SharedCounter instance. It is itself serializable.
+        """
+        return {
+            'parent_state': super().__getstate__(),
+            'size': self.size,
+        }
+
+    def __setstate__(self, state):
+        super().__setstate__(state['parent_state'])
+        self.size = state['size']
+
+    def put(self, *args, **kwargs):
+        super().put(*args, **kwargs)
+        self.size.increment(1)
+
+    def get(self, *args, **kwargs):
+        item = super().get(*args, **kwargs)
+        self.size.increment(-1)
+        return item
+
+    def qsize(self):
+        """ Reliable implementation of multiprocessing.Queue.qsize() """
+        return self.size.value
+
+    def empty(self):
+        """ Reliable implementation of multiprocessing.Queue.empty() """
+        return not self.qsize()
+
+## Set ips and interface in queue
+def set_hosts(subnet, ping_cmd, arping_cmd):
+    hosts = [str(ip) for ip in ipaddress.IPv4Network(subnet)]
+    for ip in hosts:
+        queue.put((ip, ping_cmd, arping_cmd))
+
+## Scan an ip address in order to check for host liveness
+def ip_scan():
+    while not queue.empty():
+    
+        ## Get args
+        args = queue.get()
+        ip = args[0]
+        ping_cmd = args[1]
+        arping_cmd = args[2]
+
+        #print("Testing ip " + ip)
+        comm1 = ping_cmd + ip
+        resp1 = os.popen(comm1)
+
+        status = "DOWN"
+        for line in resp1.readlines():
+            if(line.upper().count("TTL")):
+                status = "UP"
+                #print(ip, "--> Live")
+                break
+
+        if(status == "DOWN"):
+            comm2 = arping_cmd + ip
+            resp2 = os.popen(comm2)
+
+            for line in resp2.readlines():
+                if(line.upper().count("RTT")):
+                    status = "UP, NO ICMP"
+                    #print(ip, "--> Live, NO ICMP")
                     break
 
-            if(status == "DOWN"):
-                comm2 = arping1 + addr
-                resp2 = os.popen(comm2)
+        ## Get target MAC address
+        Popen(["ping", "-c 1", ip], stdout = PIPE)
+        pid = Popen(["arp", "-n", ip], stdout = PIPE)
+        s = pid.communicate()[0]
+        hasMac = re.search(r"(([a-f\d]{1,2}\:){5}[a-f\d]{1,2})", s.decode())
+        if hasMac is not None:
+            mac = hasMac.groups()[0]
+        else:
+            mac = 'None'
 
-                for line in resp2.readlines():
-                    if(line.upper().count("RTT")):
-                        status = "UP, NO ICMP"
-                        #print(addr, "--> Live, NO ICMP")
-                        break
+        hostname = 'None'
+        ## Get hostname
+        ## TODO
 
-            now = time.strftime('%Y-%m-%d %H:%M:%S')
+        ## Set data
+        data = (ip,mac,hostname,status)
+        if status == "UP":
+            #print(data)
+            live_hosts.put(data)
 
-            ## Get target MAC address
-            Popen(["ping", "-c 1", addr], stdout = PIPE)
-            pid = Popen(["arp", "-n", addr], stdout = PIPE)
-            s = pid.communicate()[0]
-            hasMac = re.search(r"(([a-f\d]{1,2}\:){5}[a-f\d]{1,2})", s.decode())
-            if hasMac is not None:
-                mac = hasMac.groups()[0]
-            else:
-                mac = 'None'
 
-            hostname = socket.gethostbyaddr(addr)
-            data = (addr,mac,hostname,now,status)
+## Initialize threaded scanner with n threads
+def initialize_scanner(threads, subnet, ping_cmd, arping_cmd):
 
-            if(status == "DOWN"):
-                print(addr, "is unreachable")
-            else:
-                print(data)
+    set_hosts(subnet, ping_cmd, arping_cmd)
 
-    except KeyboardInterrupt:
-        print("Execution interrupted: Ctrl+C")
-        sys.exit()
+    thread_list = []
+
+    for t in range(threads):
+        thread = threading.Thread(target=ip_scan)
+        thread.Daemon = True
+        thread_list.append(thread)
+
+    for thread in thread_list:
+        thread.start()
+
+    for thread in thread_list:
+        thread.join()
 
 ## MAIN -------------------------------------
-## Clear screen
-subprocess.call('clear', shell=True)
+if __name__ == "__main__":
+    if len(sys.argv) == 2:
+        ## Initialize Thread Queue
+        queue = ImpQueue()
 
-if sys.argv == 2:
-    interface = input("Enter the interface: ")
+        ## Initialize Hosts Queue
+        live_hosts = ImpQueue()
 
-    ## Set the beginning datetime
-    t1 = dt.now()
+        try:
 
-    subnets = open(sys.argv[1],"r")
-    for subnet in subnets:
-        ## Run the scanner
-        run_scanner(subnet, interface)
+            ## Validates if the OS is Windows or other
+            ## and sets the appropriate commands
+            oper = platform.system()
+            timeout = 4
+            if(oper == "Windows"):
+                ping_cmd = f"ping -n 1 -w {timeout} "
+                arping_cmd = f"arp-ping -n 1 "
+            else:
+                ## Ask for the interface for arping
+                interface = input("Enter the interface: ")
+                ping_cmd = f"ping -c 1 -t {timeout} "
+                arping_cmd = f"arping -c 1 -i {interface}"
+                
+            ## Set the beginning datetime
+            t1 = dt.now()
 
-    ## Set the ending datetime
-    t2 = dt.now()
+            subnets = open(sys.argv[1],"r")
+            for subnet in subnets:
+                subnet = subnet.replace("\n","").replace("\t","")
+                ## Run the scanner
+                print("Scanning Subnet: ", subnet)
 
-    ## Calculates the scan time and prints it
-    total = t2 - t1
-    print("Scanning completed in: ",total)
+                ## Scans the machines in the defined range
+                print("Scanning in Progress")
 
-else:
-    print(f'[-] Usage: {str(sys.argv[0])} <subnet_list>')
+                ## Initialize threaded scanner with n threads
+                initialize_scanner(256, subnet, ping_cmd, arping_cmd)
+
+            ## Set the ending datetime
+            t2 = dt.now()
+            
+            ## Calculates the scan time and prints it
+            total = t2 - t1
+
+            nbr_hosts_up = live_hosts.qsize()
+            while not live_hosts.empty():
+                host = live_hosts.get()
+                print(host)
+
+            print("Scanning completed in: ",total)
+            print(str(nbr_hosts_up) + " hosts up.")
+
+        except KeyboardInterrupt:
+            print("Execution interrupted: Ctrl+C")
+            sys.exit()
+
+    else:
+        print('[-] Usage: ' + sys.argv[0] + ' subnet_list.txt')
