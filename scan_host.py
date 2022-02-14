@@ -13,9 +13,17 @@ from subprocess import Popen, PIPE
 def run_scanner(subnet, interface):
 
     try:
-        ## Sets the range of machines
-        st1 = 1
-        en1 = 256
+        ## Sets the range of ip address from subnet
+        (ip, cidr) = subnet.split('/')
+        cidr = int(cidr) 
+        host_bits = 32 - cidr
+        i = struct.unpack('>I', socket.inet_aton(ip))[0] # note the endianness
+        start = (i >> host_bits) << host_bits # clear the host bits
+        end = start | ((1 << host_bits) - 1)
+
+        # excludes the first and last address in the subnet
+        for i in range(start, end):
+            print(socket.inet_ntoa(struct.pack('>I',i)))
 
         ## Validates if the OS is Windows or other
         ## and sets the appropriate commands
@@ -29,7 +37,7 @@ def run_scanner(subnet, interface):
 
         ## Scans the machines in the defined range
         print("Scanning in Progress")
-        for ip in range(st1,en1):
+        for ip in range(start,end):
             addr = net + '.' + str(ip)
             print("Testing ip " + addr)
             comm1 = ping1 + addr
