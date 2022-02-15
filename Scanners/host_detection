@@ -97,7 +97,7 @@ class ImpQueue(Queue):
         """ Reliable implementation of multiprocessing.Queue.empty() """
         return not self.qsize()
 
-## Get hostname from socket
+##
 def get_hostname(ip):
     try:
         hostdata = socket.gethostbyaddr(ip)
@@ -105,35 +105,76 @@ def get_hostname(ip):
     except socket.herror:
         return None
 
+## Get MAC Address from IP
+def get_macaddress(ip, oper):
+    ## Get target MAC address
+    if oper == "Windows":
+        mac = scapy.getmacbyip(ip)
+    else:    
+        Popen(["ping", "-c 1", ip], stdout = PIPE)
+        pid = Popen(["arp", "-n", ip], stdout = PIPE)
+        s = pid.communicate()[0]
+        hasMac = re.search(r"(([a-f\d]{1,2}\:){5}[a-f\d]{1,2})", s.decode())
+        if hasMac is not None:
+            mac = hasMac.groups()[0]
+        else:
+            mac = scapy.getmacbyip(ip)
+    return mac
+
 ## Scan an ip address in order to check for host liveness
 def ip_scan():
     while not queue.empty():
     
         ## Get args
-        ip = queue.get()
+        args = queue.get()
+
+        ## Prepare args
+        ip = args[0]
+        oper = args[1]
+        ping_cmd = args[2]
+        arping_cmd = args[3]
+
         mac = None
         hostname = None
         target_os = "Unknown"
         status = "DOWN"
 
-        ## ICMP Ping and ARP Ping with scapy
-        ans, unans = scapy.sr(scapy.IP(dst=ip)/scapy.ICMP(), retry=0, timeout=1)
-
-        if ans is not None and len(ans) > 0:
-            status = "UP"
-            ttl = ans[0][0].ttl 
-            if ttl < 70:
-                target_os = "Linux"
-            elif ttl > 119:
-                target_os = "Windows"  
-        else:
-            ans, unans = scapy.arping(ip)
-            if len(ans):
+        com = ping_cmd + ip
+        res = os.popen(com)
+        for line in res.readlines():
+            if line.upper().count("TTL"):
+                ## Get TTL value from response
+                ttl = 0
+                pattern = re.compile(r'[t,T][t,T][l,L]=\d*')
+                ttl_call = pattern.search(str(line))
+                if ttl_call is not None:
+                    ttl_group = ttl_call.group()
+                    result_ttl = re.findall(r'\d+', ttl_group)
+                    ttl = int(result_ttl[0])
+                    if ttl > 32 and ttl < 70:
+                        target_os = "Linux"
+                    elif ttl > 119 and ttl < 200:
+                        target_os = "Windows" 
                 status = "UP"
+                break
+
+        if status == "DOWN":
+            if oper == "Windows":
+                com2 = arping_cmd + ip
+                res2 = os.popen(com2)
+                for line in res2.readlines():
+                    if line.upper().count("RTT"):
+                        status = "UP"
+                        break
+            else:
+                ## Scapy implementation - not reliable with Windows
+                ans, unans = scapy.arping(ip)
+                if len(ans):
+                    status = "UP"
 
         ## Get mac address from IP
         if status == "UP":
-            mac = scapy.getmacbyip(ip)
+            mac = get_macaddress(ip, oper)
             
         ## Get hostname
         hostname = get_hostname(ip)
@@ -141,24 +182,27 @@ def ip_scan():
         ## Set data
         data = (ip,mac,hostname,target_os,status)
         if status == "UP":
-            #print(data)
             with thread_lock:
                 live_hosts.put(data)
 
 ## Set ips and interface in queue
-def set_hosts(subnet):
+def set_hosts(subnet, oper, ping_cmd, arping_cmd):
     print(f"Setting hosts for subnet {subnet}")
-    hosts = [str(ip) for ip in ipaddress.IPv4Network(subnet)]
-    
-    for ip in hosts:
-        ## Add target data to queue
-        queue.put(ip)
+    try:
+        hosts = [str(ip) for ip in ipaddress.IPv4Network(subnet)]
+        
+        for ip in hosts:
+            ## Add target data to queue
+            queue.put((ip, oper, ping_cmd, arping_cmd))
+    except:
+        print(f"Subnet {subnet} is invalid!")
+        pass
 
 ## Initialize threaded scanner with n threads
-def initialize_scanner(threads, subnet):
+def initialize_scanner(threads, subnet, oper, ping_cmd, arping_cmd):
     print(f"Initializing Scanning for subnet {subnet}")
 
-    set_hosts(subnet)
+    set_hosts(subnet, oper, ping_cmd, arping_cmd)
 
     thread_list = []
 
@@ -173,6 +217,19 @@ def initialize_scanner(threads, subnet):
     for thread in thread_list:
         thread.join()
 
+## Set commands based on operating system
+def set_commands(oper, timeout):
+    if(oper == "Windows"):
+        ping_cmd = f"ping -n 1 -w {timeout} "
+        arping_cmd = f"arp-ping -n 1 "
+    else:
+        ## Ask for the interface for arping
+        interface = input("Enter the interface: ")
+        ping_cmd = f"ping -c 1 -t {timeout} "
+        arping_cmd = f"arping -c 1 -i {interface} "
+
+    return ping_cmd, arping_cmd
+
 ## MAIN -------------------------------------
 if __name__ == "__main__":
     if len(sys.argv) == 2:
@@ -185,10 +242,18 @@ if __name__ == "__main__":
         ## Set a lock to prevent concurrency
         thread_lock = threading.Lock()
 
-        ## Set scapy verbose mode to null
-        scapy.conf.verb = 0
-
         try:
+
+            ## Validates if the OS is Windows or other
+            ## to set the appropriate commands
+            oper = platform.system()
+            
+            ## Set scapy verbose mode to null
+            scapy.conf.verb = 0
+
+            ## Set commands based on host OS
+            timeout = 4
+            ping_cmd, arping_cmd = set_commands(oper, timeout)
             
             subnets = open(sys.argv[1],"r")
 
@@ -204,7 +269,7 @@ if __name__ == "__main__":
                 subnet = subnet.replace("\n","").replace("\t","")
 
                 ## Initialize threaded scanner with n threads
-                initialize_scanner(threads, subnet)
+                initialize_scanner(threads, subnet, oper, ping_cmd, arping_cmd)
             
             ## Set the ending datetime
             t2 = dt.now()
@@ -213,9 +278,14 @@ if __name__ == "__main__":
             total = t2 - t1
 
             nbr_hosts_up = live_hosts.qsize()
+            output = open(str(int(time.time()))+"live_hosts.txt", "w")
             while not live_hosts.empty():
                 host = live_hosts.get()
                 print(host)
+                output.writelines(str(host)+"\n")
+            
+            subnets.close()
+            output.close()
 
             print("Scanning completed in: ",total)
             print(str(nbr_hosts_up) + " hosts up.")
