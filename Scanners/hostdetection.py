@@ -1,7 +1,6 @@
 #!/usr/bin/python
 #coding=utf-8
-# Application that detects alive hosts using ICMP
-# and does a port scan for every alive target
+# Application that detects alive hosts using ICMP and ARP
 # by FM
 # Python 3
 # -------------------------------------
