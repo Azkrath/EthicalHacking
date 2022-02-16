@@ -254,44 +254,53 @@ if __name__ == "__main__":
             timeout = 4
             ping_cmd, arping_cmd = set_commands(oper, timeout)
             
-            subnets = open(sys.argv[1],"r")
+            try:
+                os.mkdir("Scans")
+            except FileExistsError:
+                pass
+ 
+            # Muda de diretoria
+            os.chdir("scans")
 
-            ## Set the beginning datetime
-            t1 = dt.now()
+            subnet = sys.argv[1]
+            network = subnet.split("/",1)[0]
+            with open(network+".txt", "w") as output:
 
-            ## Scans the machines in the defined range
-            print("Scanning in Progress")
+                ## Scans the machines in the defined range
+                print("Scanning in Progress")
+                output.write("Scanning in Progress\n")
 
-            thread_list = []
-            threads = 1024
-            for subnet in subnets:
-                subnet = subnet.replace("\n","").replace("\t","")
+                thread_list = []
+                threads = 1024
+
+                ## Set the beginning datetime
+                t1 = dt.now()
 
                 ## Initialize threaded scanner with n threads
                 initialize_scanner(threads, subnet, oper, ping_cmd, arping_cmd)
-            
-            ## Set the ending datetime
-            t2 = dt.now()
-            
-            ## Calculates the scan time and prints it
-            total = t2 - t1
+                
+                ## Set the ending datetime
+                t2 = dt.now()
+                
+                ## Calculates the scan time and prints it
+                total = t2 - t1
 
-            nbr_hosts_up = live_hosts.qsize()
-            output = open(str(int(time.time()))+"live_hosts.txt", "w")
-            while not live_hosts.empty():
-                host = live_hosts.get()
-                print(host)
-                output.writelines(str(host)+"\n")
-            
-            subnets.close()
-            output.close()
+                nbr_hosts_up = live_hosts.qsize()
+                
+                while not live_hosts.empty():
+                    host = live_hosts.get()
+                    print(host)
+                    output.writelines(str(host)+"\n")
 
-            print("Scanning completed in: ",total)
-            print(str(nbr_hosts_up) + " hosts up.")
+                print("Scanning completed in: ",total)
+                print(str(nbr_hosts_up) + " hosts up.")
+
+                output.write("Scanning completed in: " + str(total)+"\n")
+                output.write(str(nbr_hosts_up) + " hosts up.\n")
 
         except KeyboardInterrupt:
             print("Execution interrupted: Ctrl+C")
             sys.exit()
 
     else:
-        print('[-] Usage: ' + sys.argv[0] + ' subnet_list.txt')
+        print('[-] Usage: ' + sys.argv[0] + ' 192.168.1.0/24')

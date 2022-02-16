@@ -1,0 +1,23 @@
+Scanning in Progress
+('192.168.1.1', '76:9b:e8:e8:26:3', None, 'Linux', 'UP')
+('192.168.1.0', 'ff:ff:ff:ff:ff:ff', None, 'Linux', 'UP')
+('192.168.1.7', '2c:cc:44:78:bc:f5', None, 'Linux', 'UP')
+('192.168.1.2', '84:2a:fd:fb:63:d6', None, 'Linux', 'UP')
+('192.168.1.142', 'b8:be:f4:a8:28:0', None, 'Linux', 'UP')
+('192.168.1.254', 'b8:be:f4:97:95:bc', None, 'Linux', 'UP')
+('192.168.1.187', 'b0:4e:26:a8:56:b2', None, 'Linux', 'UP')
+('192.168.1.183', 'b8:be:f4:a6:e5:e3', None, 'Linux', 'UP')
+('192.168.1.191', '70:88:6b:88:b6:fd', None, 'Linux', 'UP')
+('192.168.1.192', '6c:a6:4:8f:44:56', None, 'Linux', 'UP')
+('192.168.1.255', 'ff:ff:ff:ff:ff:ff', None, 'Linux', 'UP')
+('192.168.1.194', '0:0:c0:8:e1:a6', None, 'Linux', 'UP')
+('192.168.1.189', '48:3f:da:6c:99:cf', None, 'Unknown', 'UP')
+('192.168.1.181', 'b0:4e:26:a8:56:b2', None, 'Linux', 'UP')
+('192.168.1.252', 'b6:4e:26:a8:56:b3', None, 'Linux', 'UP')
+('192.168.1.253', 'b8:be:f4:17:47:36', None, 'Linux', 'UP')
+('192.168.1.146', '2c:fd:ab:c8:bd:df', None, 'Unknown', 'UP')
+('192.168.1.188', '0:0:8a:ee:5a:68', None, 'Unknown', 'UP')
+('192.168.1.182', 'b0:4e:26:a8:56:b2', None, 'Unknown', 'UP')
+('192.168.1.220', '1c:c1:c:df:cf:23', None, 'Unknown', 'UP')
+Scanning completed in: 0:00:11.919645
+20 hosts up.
