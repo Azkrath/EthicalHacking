@@ -260,7 +260,7 @@ if __name__ == "__main__":
                 pass
  
             # Muda de diretoria
-            os.chdir("scans")
+            os.chdir("Scans")
 
             subnet = sys.argv[1]
             network = subnet.split("/",1)[0]
@@ -297,6 +297,9 @@ if __name__ == "__main__":
 
                 output.write("Scanning completed in: " + str(total)+"\n")
                 output.write(str(nbr_hosts_up) + " hosts up.\n")
+
+            # Muda de diretoria
+            os.chdir("../")
 
         except KeyboardInterrupt:
             print("Execution interrupted: Ctrl+C")
